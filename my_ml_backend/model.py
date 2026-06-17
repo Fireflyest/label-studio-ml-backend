@@ -6,26 +6,46 @@ from label_studio_ml.model import LabelStudioMLBase
 from label_studio_ml.response import ModelResponse
 
 import config
-from sam3_detector import SAM3Detector
+
+
+def _get_detector_class():
+    """根据 config.DETECTOR_BACKEND 动态选择检测器类"""
+    backend = config.DETECTOR_BACKEND.strip().lower()
+    if backend == "gemma":
+        from gemma_playcall_detector import GemmaDetector
+        return GemmaDetector
+    elif backend == "sam3":
+        from sam3_playcall_detector import SAM3Detector
+        return SAM3Detector
+    else:
+        raise ValueError(
+            f"未知的 DETECTOR_BACKEND='{backend}', 可选值: 'gemma' / 'sam3'\n"
+            f"请在 .env 或环境变量中设置 DETECTOR_BACKEND"
+        )
 
 
 class NewModel(LabelStudioMLBase):
-    """基于 SAM3 的自动标注后端
+    """自动标注后端
 
-    检测图片中的 person 与 smartphone,根据手机相对于人物框的位置
-    判定为 "call"(打电话)或 "play"(玩手机),并以 RectangleLabels
-    形式返回给 Label Studio。
+    支持两种检测器后端(通过 config.DETECTOR_BACKEND / .env 切换):
+      - gemma : 使用本地 Gemma 视觉语言模型 (默认)
+      - sam3  : 使用 SAM3 检测器
+
+    两种后端均输出相同格式的结果, 此处代码无需区分。
     """
 
     def setup(self):
         """Configure any parameters of your model here"""
-        self.set("model_version", "sam3-v1")
-        # 模型较大,采用懒加载: 首次 predict 时再初始化,避免后端启动卡顿
+        backend = config.DETECTOR_BACKEND.strip().lower()
+        self.set("model_version", f"{backend}")
+        # 懒加载: 首次 predict 时再初始化,避免后端启动卡顿
         self._detector = None
+        print(f"[NewModel] 检测器后端: {backend}")
 
-    def _get_detector(self) -> SAM3Detector:
+    def _get_detector(self):
         if self._detector is None:
-            self._detector = SAM3Detector.get_instance()
+            detector_cls = _get_detector_class()
+            self._detector = detector_cls.get_instance()
         return self._detector
 
     def _get_image_control(self):
@@ -113,5 +133,6 @@ class NewModel(LabelStudioMLBase):
     def fit(self, event, data, **kwargs):
         """
         This method is called each time an annotation is created or updated
+        当前自动标注后端不需要在线训练,保留空实现以兼容框架接口
         """
         pass
